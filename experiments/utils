@@ -1,0 +1,10 @@
+from matplotlib import pyplot as plt
+
+def imshow(title, img, size = 10, gray=False):
+    fig = plt.figure(figsize=(size,size))
+    if gray:
+        plt.imshow(img, cmap='gray')
+    else:
+        plt.imshow(img[:,:,::-1])
+    plt.title(title)
+    plt.show()
