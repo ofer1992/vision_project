@@ -1,21 +1,18 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 
-from utils import imshow
+from utils import imshow, build_board
 from trackers import TemplateTracker, CornerTracker, OpticalFlowTracker
 from boardtracker import  BoardTracker
 
+# cap.get(cv2.CAP_PROP_POS_FRAMES)
 
     
-
-
-    
-cap = cv2.VideoCapture("../lecture.mp4")
+cap = cv2.VideoCapture("../Recorded Lesson.mp4")
 
 # fast forward to frame with full board in frame
-for _ in range(120):
-    a,b = cap.read()
+for _ in range(4980):
+    ret = cap.grab()
 
 
 
@@ -32,43 +29,14 @@ motion_tracker = OpticalFlowTracker(old_gray, corner_mask)
 # ct = CornerTracker(cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY))
 
 # initial corner locations.
-corners = np.array([[285,70],[1170,50],[300,420],[1160,400]], dtype='float64')
-board1 = BoardTracker(old_gray, tl=corners[0], bl=corners[1], tr=corners[2],
-                      br=corners[3])
-# setting tracker templates
-# corner_templates2 = []
-# for c in np.uint16(corners):
-#     corner_templates2.append(TemplateTracker(old_frame, c[0], c[1]))
-
+# corners1 = np.array([[285, 70], [300, 420], [1170, 50], [1160, 400]], dtype='float64')
+corners1 = build_board(old_frame)
+board1 = BoardTracker(old_gray, tl=corners1[0], bl=corners1[1], tr=corners1[2],
+                      br=corners1[3])
+boards = [board1]
 # fourcc = cv2.VideoWriter_fourcc(*'XVID')
 # out = cv2.VideoWriter('output.avi',fourcc, 20.0, (750,300))
 
-# bg = None
-# counter = 0
-# moving = False
-# def rectify(frame):
-#     global bg
-#     global counter
-#     global moving
-#     x0 = frame.shape[1]
-#     y0 = frame.shape[0]
-#     big = np.zeros(tuple([i * 3 for i in frame.shape[:2]]+[frame.shape[2]]), dtype='uint8')
-#     big[y0:y0+frame.shape[0],x0:x0+frame.shape[1]] = frame
-#     pts1 = np.float32([[x0+t.x, y0+t.y] for t in corner_templates2])
-#     pts2 = np.float32([[0,0],[750,0],[0,300],[750,300]])
-#     M = cv2.getPerspectiveTransform(pts1,pts2)
-#     dst = cv2.warpPerspective(big,M,(750,300))
-#     if bg is None:
-#         bg = dst
-#     elif counter % 25 == 0 and not moving:
-#         bg[dst!=0] = dst[dst!=0]
-#     dst[dst==0] = bg[dst==0]
-#     counter+=1
-#
-#     cv2.imshow("big", dst)
-#     # out.write(dst)
-
-# Create a mask image for drawing purposes
 mask = np.zeros_like(old_frame)
 
 
@@ -77,16 +45,19 @@ while(1):
     if not ret:
         break
     frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
+    if int(cap.get(cv2.CAP_PROP_POS_FRAMES)) == 7710:
+        print "SECOND SCREEN"
+        corners2 = [(130, 48), (150, 393), (1015, 55), (1007, 412)]
+        boards.append(BoardTracker(frame_gray, tl=corners2[0], bl=corners2[1],
+                                   tr=corners2[2], br=corners2[3]))
     # calculate optical flow
-        
-    mode_x, mode_y = motion_tracker.calc_flow(frame_gray)
-    # mode_x, mode_y = ct.traGck(frame_gray)
-    moving = abs(mode_x) > 3
+    dx, dy = motion_tracker.calc_flow(frame_gray)
+    camera_moving = abs(dx) > 3
 
-    board1.apply_motion(mode_x, mode_y)
-    board1.apply_template_tracking(frame_gray)
-    board1.rectify(frame, moving)
+    for board in boards:
+        board.apply_motion(dx, dy)
+        board.apply_template_tracking(frame_gray)
+        board.rectify(frame, camera_moving)
     # for t in corner_templates2:
     #     t.apply_motion(mode_x, mode_y)
     #     if 0 < t.x < frame.shape[1] and 0 < t.y < frame.shape[0]:
@@ -95,8 +66,11 @@ while(1):
         
     # rectify(frame)
 
-    motion_tracker.draw_points_on_frame(frame)
-    cv2.imshow('frame', frame)
+    mask = np.uint8(0.9 * mask)
+    motion_tracker.draw_points_on_frame(mask)
+    for board in boards:
+        board.draw_corners(frame)
+    cv2.imshow('frame', cv2.add(frame, mask))
     k = cv2.waitKey(1) & 0xff
     if k == 27:
         break

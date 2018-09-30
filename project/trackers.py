@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 class MotionHistogram:
 
     def __init__(self):
-        self.fig = plt.figure()
+        # self.fig = plt.figure()
         self.c = 0
         self.bins = np.arange(-10,10,0.3)
 
@@ -54,11 +54,12 @@ class TemplateTracker:
     """ Generates template from starting coordinates and tracks in video"""
     TEMPLATE_WIDTH = 50
     TEMPLATE_HIGHT = 50
-    SEARCH_DELTA = 100
+    BASE_SEARCH_DELTA = 100
 
     def __init__(self, frame, point):
         self.x = point[0]
         self.y = point[1]
+        self.delta_inc = 0
         self._generate_template(frame, int(self.x), int(self.y))
 
     def _generate_template(self, frame, x, y):
@@ -69,10 +70,11 @@ class TemplateTracker:
         self.template = frame[y - dy:y + dy, x - dx:x + dx]
 
     def track_new_loc(self, frame):
-        min_row = max(0, int(self.y) - self.SEARCH_DELTA)
-        max_row = min(int(self.y) + self.SEARCH_DELTA, frame.shape[0] - 1)
-        min_col = max(0, int(self.x) - self.SEARCH_DELTA)
-        max_col = min(int(self.x) + self.SEARCH_DELTA, frame.shape[1] - 1)
+        delta = self.BASE_SEARCH_DELTA + self.delta_inc
+        min_row = max(0, int(self.y) - delta)
+        max_row = min(int(self.y) + delta, frame.shape[0] - 1)
+        min_col = max(0, int(self.x) - delta)
+        max_col = min(int(self.x) + delta, frame.shape[1] - 1)
         #         print min_row, max_row, min_col, max_col
         sub_frame = frame[min_row:max_row,
                     min_col:max_col]
@@ -81,7 +83,7 @@ class TemplateTracker:
         res = cv2.matchTemplate(sub_frame, self.template, 5)  # using SQDIFF_NORMED
         min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
         top_left = list(max_loc)
-        if max_val > 0.8:
+        if max_val > 0.9:
             #         cv2.circle(sub_frame, tuple(top_left), 10, (0,0,0), -1)
             #         bottom_right = tuple([top_left[0]+self.TEMPLATE_WIDTH, top_left[1]+self.TEMPLATE_HIGHT])
             #         cv2.rectangle(sub_frame, tuple(top_left), bottom_right, 255, 2)
@@ -89,6 +91,9 @@ class TemplateTracker:
             #         imshow("conv", res, gray=True)
             self.x = top_left[0] + min_col + self.TEMPLATE_WIDTH / 2
             self.y = top_left[1] + min_row + self.TEMPLATE_HIGHT / 2
+            self.delta_inc = 0
+        else:
+            self.delta_inc = min(self.delta_inc + 1, min(frame.shape))
 
     def apply_motion(self, dx, dy):
         self.x += dx
@@ -98,7 +103,11 @@ class TemplateTracker:
         top_left = (int(self.x) - self.TEMPLATE_WIDTH / 2, int(self.y) - self.TEMPLATE_HIGHT / 2)
         bottom_right = (int(self.x) + self.TEMPLATE_WIDTH / 2, int(self.y) + self.TEMPLATE_HIGHT / 2)
         cv2.circle(frame, self.get_loc(), 3, (0, 0, 0), -1)
-        cv2.rectangle(frame, top_left, bottom_right, 255, 2)
+        cv2.rectangle(frame, top_left, bottom_right, (255,0,0), 2)
+        delta = self.BASE_SEARCH_DELTA + self.delta_inc
+        delta_top_left = (int(self.x) - delta / 2, int(self.y) - delta / 2)
+        delta_bottom_right = (int(self.x) + delta / 2, int(self.y) + delta / 2)
+        cv2.rectangle(frame, delta_top_left, delta_bottom_right, (0,0,255), 2)
 
     def show_template(self):
         imshow("template", self.template)
@@ -192,6 +201,6 @@ class OpticalFlowTracker:
         return mode_x, mode_y
 
     def draw_points_on_frame(self, frame):
-        for i in range(self.p0.shape[0]):
-            cv2.circle(frame, tuple(self.p0[i].squeeze()), 3, self.color[i], -1)
+        for i, point in enumerate(self.p0):
+            cv2.circle(frame, tuple(point.squeeze()), 3, self.color[i], -1)
 

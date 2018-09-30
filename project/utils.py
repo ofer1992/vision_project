@@ -1,6 +1,6 @@
 from matplotlib import pyplot as plt
 import cv2
-
+import numpy as np
 
 def imshow(title, img, size=8, gray=False):
     'display opencv image'
@@ -22,3 +22,27 @@ def color_hist(img):
         plt.plot(histr, color=col)
         plt.xlim([0, 256])
     plt.show()
+
+def build_board(frame):
+    """
+    display image and click on corners to specify coordinates.
+    expected order is top-left, bottom-left, top-right, bottom-right
+    :param frame:
+    :return:
+    """
+    fig = plt.figure(figsize=(20,20))
+    plt.imshow(frame[:,:,::-1])
+    coords = []
+    def on_click(event, coords=coords):
+        coords += [(event.xdata, event.ydata)]
+        if len(coords) == 4:
+            plt.close(fig)
+        print coords
+    fig.canvas.mpl_connect('button_press_event', on_click)
+    plt.show()
+    if len(coords) != 4:
+        raise ValueError("4 corners haven't been selected!")
+    return coords
+
+# im = np.ones((50,50,3), dtype='uint8') * 255
+# build_board(im)
