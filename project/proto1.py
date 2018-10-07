@@ -2,7 +2,7 @@ import cv2
 import numpy as np
 
 from utils import imshow, build_board
-from trackers import TemplateTracker, CornerTracker, OpticalFlowTracker
+from trackers import TemplateTracker, CornerTracker, OpticalFlowTracker, NewOpticalFlowTracker
 from boardtracker import  BoardTracker
 
 # cap.get(cv2.CAP_PROP_POS_FRAMES)
@@ -26,6 +26,7 @@ corner_mask[:150,:] = 255
 # imshow("mask",corner_mask, gray=True)
 
 motion_tracker = OpticalFlowTracker(old_gray, corner_mask)
+# motion_tracker = NewOpticalFlowTracker(old_gray)
 # ct = CornerTracker(cv2.cvtColor(old_frame, cv2.COLOR_BGR2GRAY))
 
 # initial corner locations.
