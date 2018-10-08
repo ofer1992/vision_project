@@ -158,12 +158,14 @@ class MotionHistogram:
         t = t.flatten()
         x_mot = t[0::2]
         y_mot = t[1::2]
-        uniq, count = np.unique(x_mot, return_counts=True)
-        mode_x = uniq[np.argmax(count)]
-        uniq, count = np.unique(y_mot, return_counts=True)
-        mode_y = uniq[np.argmax(count)]
+        # uniq, count = np.unique(x_mot, return_counts=True)
+        # mode_x = uniq[np.argmax(count)]
+        # uniq, count = np.unique(y_mot, return_counts=True)
+        # mode_y = uniq[np.argmax(count)]
 
 #         return mode_x, mode_y
+        if x_mot.size == 0 or y_mot.size == 0:
+            return 0, 0
         return np.median(x_mot), np.median(y_mot)
 
 
@@ -178,6 +180,8 @@ class TemplateTracker:
         self.x = point[0]
         self.y = point[1]
         self.delta_inc = 0
+        self.TEMPLATE_WIDTH = int(min(self.TEMPLATE_WIDTH, 2*self.x, 2*(frame.shape[1]-self.x)))
+        self.TEMPLATE_HIGHT = int(min(self.TEMPLATE_HIGHT, 2*self.y, 2*(frame.shape[1]-self.y)))
         self._generate_template(frame, int(self.x), int(self.y))
 
     def _generate_template(self, frame, x, y):
