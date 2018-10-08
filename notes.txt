@@ -1,0 +1,33 @@
+8.10:
+  Where are we standing:
+    Can track boards fairly well without vertical switch, and without being
+    ooi for too long.
+    Not much work on extracting slides out of rectified video yet. Considering
+    giving up on that part.
+
+  My attempts at tracking:
+  - FP tracking, choosing median as motion for all corners, and template
+    tracking on top for added accuracy. Susceptible to bad tracking and
+    doesn't perform well with ooi boards.
+  - Similar except instead of median as motion, find homography. Should be
+    better but sometimes I get bad homographies and lose corners.
+  - Orb feature matching and homography finding every ~second. Less resources
+    needed, but also has ad matches every once in a while.
+
+  Issues to be considered:
+  - feature points on the professor. distrupts tracking. tried using ped
+    detector with reasonable results, but hasn't improved tracking much and
+    expensive.
+  - template tracking doesn't work well when corner is occluded. also, when
+    there is a vertical board switch doesn't manage to track the board up yet
+    doesn't recognize new board as same corner.
+  - can't handle vertical board switch
+
+  Next steps:
+  - decide whether old tracker is good enough or should be discarded and focus
+    on improving homography based tracker.
+  - build basic infrastructure for debugging bad homographies?
+  - template tracking as indication of occlusion?
+  - decide what to do with vertical board switch
+  - review "multiple view geometry", specifically homographies and consequences
+    of rotation.
