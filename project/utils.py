@@ -41,7 +41,7 @@ def build_board(frame):
     fig.canvas.mpl_connect('button_press_event', on_click)
     plt.show()
     if len(coords) != 4:
-        raise ValueError("4 corners haven't been selected!")
+        return None
     return coords
 
 # im = np.ones((50,50,3), dtype='uint8') * 255
