@@ -2,10 +2,15 @@ from matplotlib import pyplot as plt
 import cv2
 import numpy as np
 
-def imshow(title, img, size=8, gray=False):
+imshow_id = 0
+def imshow(img, title=None, size=8, gray=False):
     'display opencv image'
-
+    global imshow_id
+    if title is None:
+        title = str(imshow_id)
+        imshow_id += 1
     fig = plt.figure(figsize=(size, size))
+    gray = len(img.shape) == 2
     if gray:
         plt.imshow(img, cmap='gray')
     else:

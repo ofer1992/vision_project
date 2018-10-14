@@ -1,29 +1,106 @@
 import numpy as np
 import cv2
-from utils import imshow
-import matplotlib.pyplot as plt
+import time
+import tensorflow as tf
+
+
+# TODO: credit
+class DetectorAPI:
+    def __init__(self, path_to_ckpt='/home/tomer/git/vision_project/faster_rcnn_inception_v2_coco_2018_01_28/frozen_inference_graph.pb'):
+        self.path_to_ckpt = path_to_ckpt
+
+        self.detection_graph = tf.Graph()
+        with self.detection_graph.as_default():
+            od_graph_def = tf.GraphDef()
+            with tf.gfile.GFile(self.path_to_ckpt, 'rb') as fid:
+                serialized_graph = fid.read()
+                od_graph_def.ParseFromString(serialized_graph)
+                tf.import_graph_def(od_graph_def, name='')
+
+        self.default_graph = self.detection_graph.as_default()
+        self.sess = tf.Session(graph=self.detection_graph)
+
+        # Definite input and output Tensors for detection_graph
+        self.image_tensor = self.detection_graph.get_tensor_by_name('image_tensor:0')
+        # Each box represents a part of the image where a particular object was detected.
+        self.detection_boxes = self.detection_graph.get_tensor_by_name('detection_boxes:0')
+        # Each score represent how level of confidence for each of the objects.
+        # Score is shown on the result image, together with the class label.
+        self.detection_scores = self.detection_graph.get_tensor_by_name('detection_scores:0')
+        self.detection_classes = self.detection_graph.get_tensor_by_name('detection_classes:0')
+        self.num_detections = self.detection_graph.get_tensor_by_name('num_detections:0')
+
+    def processFrame(self, image):
+        # Expand dimensions since the trained_model expects images to have shape: [1, None, None, 3]
+        image_np_expanded = np.expand_dims(image, axis=0)
+        # Actual detection.
+        start_time = time.time()
+        (boxes, scores, classes, num) = self.sess.run(
+            [self.detection_boxes, self.detection_scores, self.detection_classes, self.num_detections],
+            feed_dict={self.image_tensor: image_np_expanded})
+        end_time = time.time()
+
+        print("Elapsed Time:", end_time-start_time)
+
+        im_height, im_width,_ = image.shape
+        boxes_list = [None for i in range(boxes.shape[1])]
+        for i in range(boxes.shape[1]):
+            boxes_list[i] = (int(boxes[0,i,0] * im_height),
+                             int(boxes[0,i,1]*im_width),
+                             int(boxes[0,i,2] * im_height),
+                             int(boxes[0,i,3]*im_width))
+
+        return boxes_list, scores[0].tolist(), [int(x) for x in classes[0].tolist()], int(num[0])
+
+    def close(self):
+        self.sess.close()
+        self.default_graph.close()
 
 
 class FeaturePoint:
-
+    ID = 0
     TEMPLATE_WIDTH = 50
     TEMPLATE_HIGHT = 50
 
-    def __init__(self, frame, x, y, corner=False):
+    def __init__(self, x, y, frame=None, corner=False):
         """
         feature point in video
         """
-        assert len(frame.shape) == 2, "frame must be grayscale"
+        self.ID = FeaturePoint.ID
+        FeaturePoint.ID = (FeaturePoint.ID+1) % 100
         self.x = x
         self.y = y
         self.corner = corner
-        self.template = self._generate_template(frame, int(x), int(y))
+        if frame is not None:
+            self.rows, self.cols = frame.shape[:2]
+            self.generate_template(frame)
 
-    def tuple(self):
+    def tuple(self, integer=False):
         """
         return (x, y) tuple representation of point
         """
+        if integer:
+            return int(self.x), int(self.y)
         return self.x, self.y
+
+    def score(self, frame):
+        """
+        get template match score in location
+        """
+        assert len(frame.shape) == 2, "frame must be grayscale"
+        if not self.template_in_frame():
+            return -999
+        x, y = int(self.x), int(self.y)
+        dx, dy = self.TEMPLATE_WIDTH / 2, self.TEMPLATE_HIGHT / 2
+        compared_rect = frame[y - dy:y + dy, x - dx:x + dx]
+        score = cv2.matchTemplate(compared_rect, self.template, cv2.TM_SQDIFF_NORMED)
+        # cv2.imshow(str(self.ID), self.template)
+        # cv2.imshow(str(self.ID)+"comp", compared_rect)
+        # print score, compared_rect.shape, self.template.shape
+        # assert score.size == 1
+        if score.size != 1:
+            return -888
+        return float(score)
 
     def apply_homography(self, h):
         """
@@ -32,31 +109,59 @@ class FeaturePoint:
         transformed = np.dot(h,[self.x, self.y, 1])
         self.x, self.y, _ = transformed/transformed[2]
 
-    def ooi(self, frame):
-        return not(0 <= self.x <= frame.shape[1] and 0 <= self.y <= frame.shape[0])
+    def ooi(self, frame=None):
+        if frame is not None:
+            return not(0 <= self.x <= frame.shape[1] and 0 <= self.y <= frame.shape[0])
+        else:
+            return not(0 <= self.x <= self.cols and 0 <= self.y <= self.rows)
 
-    @staticmethod
-    def _generate_template(frame, x, y):
+    def template_in_frame(self, frame=None):
         """
-        create template from frame with center at x,y
+        is template inside frame
         """
-        dx = FeaturePoint.TEMPLATE_WIDTH / 2
-        dy = FeaturePoint.TEMPLATE_HIGHT / 2
-        return frame[y - dy:y + dy, x - dx:x + dx].copy()
+        x, y = int(self.x), int(self.y)
+        dx, dy = self.TEMPLATE_WIDTH / 2, self.TEMPLATE_HIGHT / 2
+        if frame is not None:
+            return  dx <= x <= frame.shape[1] - dx and dy <= y <= frame.shape[0] - dy
+        else:
+            return dx <= x <= self.cols - dx and dy <= y <= self.rows - dy
+
+    def occluded(self, frame):
+        """
+        is point not visible
+        """
+        assert len(frame.shape) == 2, "frame must be grayscale"
+        return self.score(frame) < 0.4 # TODO: arbitrary value
+        # return False
+
+    def generate_template(self, frame):
+        assert len(frame.shape) == 2, "frame must be grayscale"
+        x, y = int(self.x), int(self.y)
+        assert 0 <= x <= frame.shape[1] and 0 <= y <= frame.shape[0], "coordinates are out-of-image"
+        dx = min(FeaturePoint.TEMPLATE_WIDTH / 2, x, frame.shape[1] - x)
+        dy = min(FeaturePoint.TEMPLATE_HIGHT / 2, y, frame.shape[0] - y)
+        self.template =  frame[y - dy:y + dy, x - dx:x + dx].copy()
+        self.TEMPLATE_WIDTH = 2 * dx
+        self.TEMPLATE_HIGHT = 2 * dy
 
     def __repr__(self):
         return "FeaturePoint(%f, %f)" % (self.x, self.y)
 
 
 class FeaturePointManager:
-    feature_params = dict(maxCorners=10,
-                      qualityLevel=0.5,
-                      minDistance=20,
+    feature_params = dict(maxCorners=15,
+                      qualityLevel=0.4,
+                      minDistance=70,
                       blockSize=7)
 
     POINT_MASK_SIZE = 50
     _colors = np.random.randint(0, 255, (100, 3))
     _points = []
+
+    # ped detection
+    hog = cv2.HOGDescriptor()
+    hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
+    detector = DetectorAPI()
 
     @staticmethod
     def generate_points_for_frame(frame, mask=None, consider_prev_points=False):
@@ -65,33 +170,66 @@ class FeaturePointManager:
         :param consider_prev_points: prevent generation of points next to older
         points
         """
-        assert len(frame.shape) == 2, "frame must be grayscale"
-        mask_points = np.zeros_like(mask, dtype='uint8')
+        # assert len(frame.shape) == 2, "frame must be grayscale"
+        frame_color = frame
+        frame = cv2.cvtColor(frame_color, cv2.COLOR_BGR2GRAY)
+        if mask is None:
+            mask = np.ones_like(frame, dtype='uint8') * 255
+        """
+        ped detection
+        rects, weights = FeaturePointManager.hog.detectMultiScale(frame, winStride=(4, 4),
+            padding=(8, 8), scale=1.05)
+        rects = [[int(i) for i in r] for r in rects]
+        for (x, y, w, h) in rects:
+            print (x, y, w, h)
+        cv2.rectangle(mask, (x, y), (x + w, y + h), 0, -1)
+        """
+
+        # coco human detector
+        resized = cv2.resize(frame_color, (1280, 720))
+        mask_ped = np.zeros(resized.shape[:2], dtype='uint8')
+        threshold = 0.7
+        boxes, scores, classes, num = FeaturePointManager.detector.processFrame(resized)
+        dx, dy = FeaturePoint.TEMPLATE_WIDTH/2, FeaturePoint.TEMPLATE_HIGHT/2
+        for i in range(len(boxes)):
+            # Class 1 represents human
+            if classes[i] == 1 and scores[i] > threshold:
+                box = boxes[i]
+                cv2.rectangle(mask_ped,(box[1]-dx,box[0]-dy),(box[3]+dx,box[2]+dy),255,-1)
+        mask_ped = cv2.resize(mask_ped, (mask.shape[1], mask.shape[0]))
+        mask = cv2.subtract(mask, mask_ped)
+
         if consider_prev_points:
+            mask_points = np.zeros_like(mask, dtype='uint8')
             y_indices, x_indices = np.indices(mask_points.shape)
             for p in FeaturePointManager._points:
-                if p.ooi:
+                if p.ooi():
                     continue
-                p = p.squeeze()
+                p = p.tuple(integer=True)
                 mask_points[(np.abs(x_indices - p[0]) < FeaturePointManager.POINT_MASK_SIZE) & (np.abs(y_indices - p[1]) < FeaturePointManager.POINT_MASK_SIZE)] = 255
-            p0 = cv2.goodFeaturesToTrack(frame, mask=cv2.subtract(mask, mask_points), **FeaturePointManager.feature_params)
-        else:
-            p0 = cv2.goodFeaturesToTrack(frame, mask=mask, **FeaturePointManager.feature_params)
+            mask = cv2.subtract(mask, mask_points)
+
+        cv2.imshow("points mask", mask)
+        # imshow(mask, "points mask")
+        p0 = cv2.goodFeaturesToTrack(frame, mask=mask, **FeaturePointManager.feature_params)
         for p in p0:
-            FeaturePointManager._points.append(FeaturePoint(frame, p[0,0], p[0, 1]))
+            FeaturePointManager._points.append(FeaturePoint(p[0,0], p[0, 1], frame))
 
     @staticmethod
-    def get_visible_points(frame):
+    def get_visible_points(frame=None):
         """
         return all visible points in a vector shaped (n,1,2)
         n - num of points
         """
-        visible_points = [[[p.x, p.y]] for p in FeaturePointManager._points if not p.ooi(frame)]
+        visible_points = [[[p.x, p.y]] for p in FeaturePointManager._points
+                          if not p.ooi() and not (frame is not None and p.occluded(frame))]
         return np.array(visible_points, dtype='float32')
 
     @staticmethod
     def update_visible_points(new, status_vec, frame):
-        visible_points = [p for p in FeaturePointManager._points if not p.ooi(frame)]
+        assert len(frame.shape) == 2, "frame must be grayscale"
+        visible_points = [p for p in FeaturePointManager._points
+                            if not p.ooi() and not p.occluded(frame)]
         assert len(visible_points) == new.shape[0], "vector of new locations should be same length as visible points"
         for p, new_loc, st in zip(visible_points, new, status_vec):
             if st == 0:
@@ -106,7 +244,7 @@ class FeaturePointManager:
         TODO: how much do i lose in storing points in list?
         """
         if only_non_visible_points:
-            points = (p for p in FeaturePointManager._points if p.ooi(frame))
+            points = (p for p in FeaturePointManager._points if p.ooi() or p.occluded(frame))
         else:
             points = FeaturePointManager._points
         for p in points:
@@ -115,217 +253,23 @@ class FeaturePointManager:
     @staticmethod
     def draw_points_on_frame(frame):
         # TODO: rewrite
-        points = np.uint32(FeaturePointManager.get_visible_points(frame))
-        for i, point in enumerate(points):
-            cv2.circle(frame, tuple(point.squeeze()), 3, FeaturePointManager._colors[i], -1)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        font                   = cv2.FONT_HERSHEY_SIMPLEX
+        fontScale              = 1
+        lineType               = 2
+        visible_points = [p for p in FeaturePointManager._points
+                          if not p.ooi()]
+        for i, point in enumerate(visible_points):
+            cv2.circle(frame, point.tuple(integer=True), 3, FeaturePointManager._colors[point.ID], -1)
+            cv2.putText(frame, "{:+.3f}".format(point.score(gray)),
+                        point.tuple(integer=True),
+                        font,
+                        fontScale,
+                        FeaturePointManager._colors[i],
+                        lineType)
 
 
-class MotionHistogram:
-
-    def __init__(self):
-        # self.fig = plt.figure()
-        self.c = 0
-        self.bins = np.arange(-10,10,0.3)
-
-    def draw(self, p1, p0):
-        if self.c < 10:
-            self.c += 1
-            return
-        plt.clf()
-        self.c = 0
-        t = p1 - p0
-        t = t.flatten()
-        x_mot = t[0::2]
-        y_mot = t[1::2]
-
-        plt.hist(x_mot, bins=self.bins, label='x', color='orange', alpha=0.5)
-#         plt.hist(y_mot, bins=self.bins, label='y', color='blue', alpha=0.5)
-        # redraw the canvas
-        self.fig.canvas.draw()
-
-        # convert canvas to image
-        img = np.fromstring(self.fig.canvas.tostring_rgb(), dtype=np.uint8,
-                sep='')
-        img  = img.reshape(self.fig.canvas.get_width_height()[::-1] + (3,))
-
-        # img is rgb, convert to opencv's default bgr
-        img = cv2.cvtColor(img,cv2.COLOR_RGB2BGR)
-
-        cv2.imshow('hist',img)
-
-    def mode(self, p1, p0):
-        t = p1 - p0
-        t = t.flatten()
-        x_mot = t[0::2]
-        y_mot = t[1::2]
-        # uniq, count = np.unique(x_mot, return_counts=True)
-        # mode_x = uniq[np.argmax(count)]
-        # uniq, count = np.unique(y_mot, return_counts=True)
-        # mode_y = uniq[np.argmax(count)]
-
-#         return mode_x, mode_y
-        if x_mot.size == 0 or y_mot.size == 0:
-            return 0, 0
-        return np.median(x_mot), np.median(y_mot)
-
-
-class TemplateTracker:
-    """ Generates template from starting coordinates and tracks in video"""
-    TEMPLATE_WIDTH = 50
-    TEMPLATE_HIGHT = 50
-    BASE_SEARCH_DELTA = 100
-
-    def __init__(self, frame, point):
-        assert len(frame.shape) == 2, "frame must be grayscale"
-        self.x = point[0]
-        self.y = point[1]
-        self.delta_inc = 0
-        self.TEMPLATE_WIDTH = int(min(self.TEMPLATE_WIDTH, 2*self.x, 2*(frame.shape[1]-self.x)))
-        self.TEMPLATE_HIGHT = int(min(self.TEMPLATE_HIGHT, 2*self.y, 2*(frame.shape[1]-self.y)))
-        self._generate_template(frame, int(self.x), int(self.y))
-
-    def _generate_template(self, frame, x, y):
-        'create template from frame with center at x,y'
-        #         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        dx = self.TEMPLATE_WIDTH / 2
-        dy = self.TEMPLATE_HIGHT / 2
-        self.template = frame[y - dy:y + dy, x - dx:x + dx]
-
-    def track_new_loc(self, frame):
-        assert len(frame.shape) == 2, "frame must be grayscale"
-        delta = self.BASE_SEARCH_DELTA + self.delta_inc
-        min_row = max(0, int(self.y) - delta)
-        max_row = min(int(self.y) + delta, frame.shape[0] - 1)
-        min_col = max(0, int(self.x) - delta)
-        max_col = min(int(self.x) + delta, frame.shape[1] - 1)
-        #         print min_row, max_row, min_col, max_col
-        sub_frame = frame[min_row:max_row,
-                    min_col:max_col]
-        assert sub_frame.shape[0] >= self.template.shape[0], str(sub_frame.shape) + " " + str(self.template.shape)
-        assert sub_frame.shape[1] >= self.template.shape[1]
-        res = cv2.matchTemplate(sub_frame, self.template, 5)  # using SQDIFF_NORMED
-        min_val, max_val, min_loc, max_loc = cv2.minMaxLoc(res)
-        top_left = list(max_loc)
-        if max_val > 0.9:
-            #         cv2.circle(sub_frame, tuple(top_left), 10, (0,0,0), -1)
-            #         bottom_right = tuple([top_left[0]+self.TEMPLATE_WIDTH, top_left[1]+self.TEMPLATE_HIGHT])
-            #         cv2.rectangle(sub_frame, tuple(top_left), bottom_right, 255, 2)
-            #         imshow("sub_frame", sub_frame)
-            #         imshow("conv", res, gray=True)
-            self.x = top_left[0] + min_col + self.TEMPLATE_WIDTH / 2
-            self.y = top_left[1] + min_row + self.TEMPLATE_HIGHT / 2
-            self.delta_inc = 0
-        else:
-            self.delta_inc = min(self.delta_inc + 1, min(frame.shape))
-
-    def apply_motion(self, dx, dy):
-        self.x += dx
-        self.y += dy
-
-    def draw_rect(self, frame):
-        top_left = (int(self.x) - self.TEMPLATE_WIDTH / 2, int(self.y) - self.TEMPLATE_HIGHT / 2)
-        bottom_right = (int(self.x) + self.TEMPLATE_WIDTH / 2, int(self.y) + self.TEMPLATE_HIGHT / 2)
-        cv2.circle(frame, self.get_loc(), 3, (0, 0, 0), -1)
-        cv2.rectangle(frame, top_left, bottom_right, (255,0,0), 2)
-        delta = self.BASE_SEARCH_DELTA + self.delta_inc
-        delta_top_left = (int(self.x) - delta / 2, int(self.y) - delta / 2)
-        delta_bottom_right = (int(self.x) + delta / 2, int(self.y) + delta / 2)
-        cv2.rectangle(frame, delta_top_left, delta_bottom_right, (0,0,255), 2)
-
-    def show_template(self):
-        imshow("template", self.template)
-
-    def get_loc(self):
-        return (int(self.x), int(self.y))
-
-
-class CornerTracker:
-
-    CORNER_SIZE = 300
-    lk_params = dict(winSize=(15, 15),
-                     maxLevel=2,
-                     criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
-    feature_params = dict(maxCorners=1,
-                          qualityLevel=0.1,
-                          minDistance=20,
-                          blockSize=7)
-
-    def __init__(self, frame):
-        assert len(frame.shape) == 2, "frame must be grayscale"
-        self.last_frame = frame
-        self.mask = np.zeros(frame.shape[:2], dtype='uint8')
-        self.mask[0:self.CORNER_SIZE, :] = 255
-        self.point = cv2.goodFeaturesToTrack(frame, mask=self.mask, **self.feature_params)
-
-    def track(self, frame):
-        assert len(frame.shape) == 2, "frame must be grayscale"
-        p1, st, err = cv2.calcOpticalFlowPyrLK(self.last_frame, frame, self.point, None, **self.lk_params)
-        motion = np.squeeze(p1 - self.point)
-        if st[0] >= 0:
-            # self.point = cv2.goodFeaturesToTrack(frame, mask=self.mask, **self.feature_params)
-            self.point = cv2.goodFeaturesToTrack(self.last_frame[0:self.CORNER_SIZE, :], mask=None, **self.feature_params)
-        else:
-            self.point = p1
-        assert self.point is not None, "No points generated!"
-        self.last_frame = frame
-        return motion
-
-    def get_corner(self):
-        window = self.last_frame[0:self.CORNER_SIZE, :].copy()
-        cv2.circle(window, tuple(np.squeeze(self.point)), 3, (0, 0, 0), -1)
-        return window
-
-
-class OpticalFlowTracker:
-    # params for ShiTomasi corner detection
-    feature_params = dict(maxCorners=10,
-                          qualityLevel=0.6,
-                          minDistance=20,
-                          blockSize=7)
-
-    # Parameters for lucas kanade optical flow
-    lk_params = dict(winSize=(15, 15),
-                     maxLevel=2,
-                     criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
-
-    def __init__(self, frame, mask=None):
-        """ assume frame is gray """
-        assert len(frame.shape) == 2, "frame must be grayscale"
-        self.mask = mask
-        self.old = frame.copy()
-        self.p0 = cv2.goodFeaturesToTrack(frame, mask=mask, **self.feature_params)
-        # Create some random colors
-        self.color = np.random.randint(0, 255, (100, 3))
-        self.motion_hist = MotionHistogram()
-
-    def calc_flow(self, frame):
-        assert len(frame.shape) == 2, "frame must be grayscale"
-        p1, st, err = cv2.calcOpticalFlowPyrLK(self.old, frame, self.p0, None, **self.lk_params)
-        self.old = frame.copy()
-        good_new = p1[st == 1]
-        good_old = self.p0[st == 1]
-        mode_x, mode_y = self.motion_hist.mode(good_new, good_old)
-        self.p0 = good_new.reshape(-1, 1, 2)
-        if self.p0.shape[0] < 5:
-            mask_points = np.zeros_like(self.mask, dtype='uint8')
-            # TODO: prevent redundant feature points. disabled for now
-            # y, x = np.indices(mask_points.shape)
-            # for p in self.p0:
-            #     p = p.squeeze()
-            #     print p
-            #     mask_points[(np.abs(x - p[0]) < 50) & (np.abs(y - p[1]) < 50)] = 255
-            new_points = cv2.goodFeaturesToTrack(frame, mask=cv2.subtract(self.mask, mask_points), **self.feature_params)
-            if new_points is not None:
-                self.p0 = np.vstack((self.p0, new_points))
-
-        return mode_x, mode_y
-
-    def draw_points_on_frame(self, frame):
-        for i, point in enumerate(self.p0):
-            cv2.circle(frame, tuple(point.squeeze()), 3, self.color[i], -1)
-
-
-class NewOpticalFlowTracker:
+class Tracker:
 
     # Parameters for lucas kanade optical flow
     lk_params = dict(winSize=(15, 15),
@@ -336,25 +280,41 @@ class NewOpticalFlowTracker:
 
     def __init__(self, frame):
         """ assume frame is gray """
-        assert len(frame.shape) == 2, "frame must be grayscale"
-        self.old = frame.copy()
+        assert len(frame.shape) == 3, "frame must be color"
+        self.old = frame
         self.color = np.random.randint(0, 255, (100, 3))
-        self.corner_mask = np.zeros(frame.shape[:2], dtype='uint8')
-        self.corner_mask[:150, :] = 255
+        FeaturePointManager.generate_points_for_frame(frame)
+        # self.corner_mask = np.zeros(frame.shape[:2], dtype='uint8')
+        # self.corner_mask[:150, :] = 255
 
     def find_homography(self, frame):
-        assert len(frame.shape) == 2, "frame must be grayscale"
-        p0 = FeaturePointManager.get_visible_points(frame)
-        print p0.shape
+        assert len(frame.shape) == 3, "frame must be color"
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        p0 = FeaturePointManager.get_visible_points()
         if p0.shape[0] < 4:
-            FeaturePointManager.generate_points_for_frame(self.old, mask=self.corner_mask, consider_prev_points=True)
-            p0 = FeaturePointManager.get_visible_points(frame)
-        p1, st, err = cv2.calcOpticalFlowPyrLK(self.old, frame, p0, None, **self.lk_params)
-        good_new = p1[st == 1]
-        good_old = p0[st == 1]
-        FeaturePointManager.update_visible_points(p1, st, frame)
-        h, mask = cv2.findHomography(good_old, good_new, cv2.RANSAC) # TODO: other methods?
+            FeaturePointManager.generate_points_for_frame(self.old, consider_prev_points=True)
+            p0 = FeaturePointManager.get_visible_points()
+        if p0.size != 0:
+            p1, st, err = cv2.calcOpticalFlowPyrLK(self.old, frame, p0, None, **self.lk_params)
+            good_new = p1[st == 1]
+            good_old = p0[st == 1]
+            # FeaturePointManager.update_visible_points(p1, st, gray)
+            h, mask = cv2.findHomography(good_old, good_new, cv2.RANSAC) # TODO: other methods?
         self.old = frame.copy()
         return h
 
 
+def test_feature_generation():
+    import cv2
+    from utils import imshow
+    cap = cv2.VideoCapture("../les1.mp4")
+    for i in range(100):
+        cap.grab()
+    while True:
+        ret, frame = cap.read()
+        FeaturePointManager.generate_points_for_frame(frame)
+        FeaturePointManager.draw_points_on_frame(frame)
+        imshow(frame)
+        FeaturePointManager._points = []
+        for i in range(24):
+            cap.grab()
