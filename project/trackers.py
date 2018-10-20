@@ -6,6 +6,8 @@ import tensorflow as tf
 
 # TODO: credit
 class DetectorAPI:
+    threshold = 0.01
+    delta = 50
     def __init__(self, path_to_ckpt='/home/tomer/git/vision_project/faster_rcnn_inception_v2_coco_2018_01_28/frozen_inference_graph.pb'):
         self.path_to_ckpt = path_to_ckpt
 
@@ -30,6 +32,8 @@ class DetectorAPI:
         self.detection_classes = self.detection_graph.get_tensor_by_name('detection_classes:0')
         self.num_detections = self.detection_graph.get_tensor_by_name('num_detections:0')
 
+        self.last_mask = None
+
     def processFrame(self, image):
         # Expand dimensions since the trained_model expects images to have shape: [1, None, None, 3]
         image_np_expanded = np.expand_dims(image, axis=0)
@@ -51,6 +55,26 @@ class DetectorAPI:
                              int(boxes[0,i,3]*im_width))
 
         return boxes_list, scores[0].tolist(), [int(x) for x in classes[0].tolist()], int(num[0])
+
+    def getHumanMask(self, img, first_iter=False):
+        mask = np.zeros(img.shape[:2], dtype='uint8')
+        cv2.resize(img, (1280, 720))
+        boxes, scores, classes, num = self.processFrame(img)
+        detected_ped = False
+        for box, score, cls in zip(boxes, scores, classes):
+            # Class 1 represents human
+            if cls == 1 and score > self.threshold:
+                detected_ped = True
+                box = list(box)
+                box[0] -= self.delta
+                box[1] -= self.delta
+                box[2] += img.shape[1]
+                box[3] += self.delta
+                cv2.rectangle(mask,(box[1],box[0]),(box[3],box[2]),255,-1)
+        if not detected_ped and self.last_mask is not None and not first_iter:
+            return self.last_mask
+        self.last_mask = mask
+        return mask
 
     def close(self):
         self.sess.close()
@@ -318,3 +342,32 @@ def test_feature_generation():
         FeaturePointManager._points = []
         for i in range(24):
             cap.grab()
+
+def test_find_homography():
+    import cv2
+    import matplotlib.pyplot as plt
+    cap = cv2.VideoCapture("../les1.mp4")
+    for i in range(312):
+        cap.grab()
+    ret, last_frame = cap.read()
+    tracker = Tracker(last_frame)
+    fig = plt.figure(figsize=(16,16))
+    ret, frame = cap.read()
+    h = tracker.find_homography(frame)
+    warped = cv2.warpPerspective(last_frame, h, frame.shape[:2][::-1])
+    fig.add_subplot(2, 2, 1)
+    FeaturePointManager.draw_points_on_frame(last_frame)
+    plt.imshow(last_frame[:,:,::-1])
+    fig.add_subplot(2, 2, 2)
+    FeaturePointManager.apply_homography(h, frame)
+    FeaturePointManager.draw_points_on_frame(frame)
+    plt.imshow(frame[:,:,::-1])
+    fig.add_subplot(2,2,3)
+    plt.imshow(warped[:,:,::-1])
+    fig.add_subplot(2,2,4)
+    plt.imshow(cv2.addWeighted(frame,.5,warped,.5,0)[:,:,::-1])
+    plt.show()
+    fig.clear()
+
+if __name__ == "__main__":
+    test_find_homography()

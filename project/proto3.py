@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
+from trackers import DetectorAPI
+from utils import alignImages
 
 RED = (0, 0, 255)
 BLUE = (255, 0, 0)
@@ -30,9 +31,12 @@ font_kwargs = {
     "thickness": 2,
 }
 
+model_path = '/home/tomer/git/vision_project/ssd_mobilenet_v1_coco_2018_01_28/frozen_inference_graph.pb'
+odapi = DetectorAPI(path_to_ckpt=model_path)
 only_bg = None
 first_iter = True
 while cap.isOpened():
+    for i in range(5): cap.grab()
     ret, frame = cap.read()
     if not ret:
         break
@@ -42,15 +46,20 @@ while cap.isOpened():
     font_kwargs['color'] = RED if diff_sum > 10000 else BLUE
     cv2.putText(frame, str(diff_sum), **font_kwargs)
     cv2.imshow('vid', frame)
-    if diff_sum <= 10000:
+    if diff_sum <= 20000:
         if first_iter:
-            only_bg = np.float32(gray)
+            if only_bg is not None:
+                warped, h = alignImages(only_bg, gray)
+                cv2.imshow('warped', warped)
+            else:
+                warped = np.zeros_like(gray)
+            only_bg = np.zeros_like(gray)
             first_iter = False
-        cv2.accumulateWeighted(gray, only_bg, 0.05)
+        fgmask = odapi.getHumanMask(frame, first_iter)
+        only_bg[fgmask == 0] = gray[fgmask == 0]
         cv2.imshow('diff', diff_im)
+        cv2.imshow('bg', cv2.addWeighted(only_bg, 0.5, warped, 0.5, 0))
     else:
-        plt.imshow(cv2.convertScaleAbs(only_bg), cmap='gray')
-        plt.show()
         first_iter = True
     k = cv2.waitKey(20) & 0xff
     if k == ord('q'):
