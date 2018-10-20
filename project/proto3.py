@@ -35,6 +35,7 @@ model_path = '/home/tomer/git/vision_project/ssd_mobilenet_v1_coco_2018_01_28/fr
 odapi = DetectorAPI(path_to_ckpt=model_path)
 only_bg = None
 first_iter = True
+id = 0
 while cap.isOpened():
     for i in range(5): cap.grab()
     ret, frame = cap.read()
@@ -49,6 +50,12 @@ while cap.isOpened():
     if diff_sum <= 20000:
         if first_iter:
             if only_bg is not None:
+                if (only_bg == 0).sum() < 10000:
+                    cv2.imwrite("/home/tomer/git/vision_project/snaps/"+str(id)+".png", only_bg)
+                    id += 1
+                    print str(id)+".png written"
+                else:
+                    print (only_bg == 0).sum()
                 warped, h = alignImages(only_bg, gray)
                 cv2.imshow('warped', warped)
             else:
