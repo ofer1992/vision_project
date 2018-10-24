@@ -44,30 +44,39 @@ if linesP is not None:
         l = linesP[i][0]
         cv2.line(cdstP, (l[0], l[1]), (l[2], l[3]), (0,0,0), 3, cv2.LINE_AA)
 
+kernel = np.ones((5,5),np.uint8)
+dilated = cv2.dilate(dst, kernel, iterations=1)
+negative_dst = 255 - dilated
+cv2.imshow("negative", negative_dst)
+cv2.imshow("dilated", dilated)
 cv2.imshow("Source", img)
 # cv2.imshow("Detected Lines (in red) - Standard Hough Line Transform", cdst)
 cv2.imshow("Detected Lines (in red) - Probabilistic Line Transform", cdstP)
 
 
-f, contours,h = cv2.findContours(cdstP, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+f, contours,h = cv2.findContours(negative_dst, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
 mask = np.zeros(img.shape[:2], dtype='uint8')
 max_rect = None
 max_area = 0
 def epsilon(cnt):
-    # return 0.08*cv2.arcLength(cnt, True)
-    return 0.08*cv2.arecv2.boundingRect(cnt)**.5
+    return 0.01*cv2.arcLength(cnt, True)
+    # return 0.1*(cv2.contourArea(cnt)**.5)
 
-def contour_area(cnt):
-    # cv2.approxPolyDP(cnt,epsilon(cnt), True)
-    return cv2.contourArea(cnt)
+# def contour_area(cnt):
+#     # cv2.approxPolyDP(cnt,epsilon(cnt), True)
+#     return cv2.contourArea(cnt)
 
 # TODO: approx quadrilateral
 
 contours = [cnt for cnt in contours ]#if len(cv2.approxPolyDP(cnt,epsilon(cnt), True)) < 15]
-contours.sort(key=contour_area)
+contours.sort(key=cv2.contourArea)
 for i, cnt in enumerate(contours[-3:]):
-    cv2.drawContours(img, [cnt], 0, (255, 255, 255), 3)
+    convex = cv2.convexHull(cnt)
+    approx = cv2.approxPolyDP(convex, epsilon(convex), True)
+    area_diff = cv2.contourArea(approx)-cv2.contourArea(cnt)
+    print len(approx), len(convex), area_diff/cv2.contourArea(approx), area_diff
+    cv2.drawContours(img, [approx], 0, (0, 0, 255), 9)
 
 # for cnt in contours:
 #     approx = cv2.approxPolyDP(cnt,0.01*cv2.arcLength(cnt, True), True)
