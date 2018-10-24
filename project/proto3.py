@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from trackers import DetectorAPI
 from utils import alignImages
+from board_detector import findBoard
 
 RED = (0, 0, 255)
 BLUE = (255, 0, 0)
@@ -18,7 +19,7 @@ def diff(curr, last):
     return diff_img, int(np.sum(diff_img) / 255)
 
 
-cap = cv2.VideoCapture("../lecture.mp4")
+cap = cv2.VideoCapture("../les2.mp4")
 
 ret, last_frame = cap.read()
 last_gray = cv2.cvtColor(last_frame, cv2.COLOR_BGR2GRAY)
@@ -50,6 +51,8 @@ while cap.isOpened():
     if diff_sum <= 20000:
         if first_iter:
             if only_bg is not None:
+                detected, im_contours = findBoard(only_bg)
+                cv2.imshow('contours', im_contours)
                 if (only_bg == 0).sum() < 10000:
                     cv2.imwrite("/home/tomer/git/vision_project/snaps/"+str(id)+".png", only_bg)
                     id += 1
