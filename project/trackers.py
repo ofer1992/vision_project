@@ -56,7 +56,7 @@ class DetectorAPI:
 
         return boxes_list, scores[0].tolist(), [int(x) for x in classes[0].tolist()], int(num[0])
 
-    def getHumanMask(self, img, first_iter=False):
+    def getHumanMask(self, img, first_frame_after_cam_movement=False):
         mask = np.zeros(img.shape[:2], dtype='uint8')
         cv2.resize(img, (1280, 720))
         boxes, scores, classes, num = self.processFrame(img)
@@ -71,7 +71,10 @@ class DetectorAPI:
                 box[2] += img.shape[1]
                 box[3] += self.delta
                 cv2.rectangle(mask,(box[1],box[0]),(box[3],box[2]),255,-1)
-        if not detected_ped and self.last_mask is not None and not first_iter:
+        if not detected_ped and self.last_mask is not None \
+                and not first_frame_after_cam_movement:
+            # TODO: instead of returning last mask, enlarge rect to account
+            # for uncertainty in ped location
             return self.last_mask
         self.last_mask = mask
         return mask

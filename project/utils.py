@@ -2,6 +2,14 @@ from matplotlib import pyplot as plt
 import cv2
 import numpy as np
 
+DEFAULT_FONT_KWARGS = {
+    "fontFace": cv2.FONT_HERSHEY_SIMPLEX,
+    "org": (10, 500),
+    "fontScale": 1,
+    "color": (255, 255, 255),
+    "thickness": 2,
+}
+
 imshow_id = 0
 def imshow(img, title=None, size=8, gray=False):
     'display opencv image'
@@ -36,7 +44,10 @@ def build_board(frame):
     :return:
     """
     fig = plt.figure(figsize=(20,20))
-    plt.imshow(frame[:,:,::-1])
+    if len(frame.shape) == 2:
+        plt.imshow(frame, cmap='gray')
+    else:
+        plt.imshow(frame[:,:,::-1])
     coords = []
     def on_click(event, coords=coords):
         coords += [(event.xdata, event.ydata)]
@@ -104,3 +115,54 @@ def alignImages(im1, im2):
 
 # im = np.ones((50,50,3), dtype='uint8') * 255
 # build_board(im)
+
+def waitQ():
+    'display images and exit with q'
+    while True:
+        k = cv2.waitKey() & 0xff
+        if k == ord('q'):
+            break
+    cv2.destroyAllWindows()
+
+def diff(curr, last):
+    """
+    returns binarized diff between two frames and number
+    of different pixels.
+    """
+    THRESH = 100
+    diff_img = cv2.absdiff(curr, last)
+    _, diff_img = cv2.threshold(diff_img, THRESH, 255, cv2.THRESH_BINARY)
+    return diff_img, int(np.sum(diff_img) / 255)
+
+def isRotating(curr, last, display=False):
+    """
+    true if difference between two frames is caused by rotation
+    """
+    ROTATION_THRESHOLD = 20000
+    diff_im, diff_sum = diff(curr, last)
+    if display:
+        cv2.imshow('diff', diff_im)
+    return diff_sum > ROTATION_THRESHOLD
+
+def compareBoards(b1, b2):
+    hist1 = cv2.calcHist(b1,[0],None, [256], [0, 256])
+    hist2 = cv2.calcHist(b2,[0],None, [256], [0, 256])
+    return cv2.compareHist(hist1, hist2, cv2.HISTCMP_BHATTACHARYYA)
+
+def _rectifyBoard(im):
+    coords = build_board(im)
+    pts1 = np.float32(coords)
+    pts2 = np.float32([(0, 300), (0, 0), (750, 0), (750, 300)])
+    M = cv2.getPerspectiveTransform(pts1,pts2)
+    return cv2.warpPerspective(im,M,(750,300))
+
+if __name__ == "__main__":
+    # im1 = cv2.imread("../snaps/13.png", cv2.IMREAD_GRAYSCALE)
+    # b1 = _rectifyBoard(im1)
+    # cv2.imwrite("../b1.png", b1)
+    b1 = cv2.imread("../b1.png", cv2.IMREAD_GRAYSCALE)
+    # im2 = cv2.imread("../snaps/20.png", cv2.IMREAD_GRAYSCALE)
+    # b2 = _rectifyBoard(im2)
+    # cv2.imwrite("../b2.png", b2)
+    b2 = cv2.imread("../b2.png", cv2.IMREAD_GRAYSCALE)
+    compareBoards(b1, b2)
